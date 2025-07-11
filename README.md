@@ -33,9 +33,12 @@ Edit the `.env` file with your Instagram credentials:
 ```properties
 INSTAGRAM_ACCESS_TOKEN=your_instagram_access_token_here
 INSTAGRAM_ACCOUNT_ID=your_instagram_account_id_here
+BEARER_TOKEN=your_secure_bearer_token_here
 HOST_URL=graph.facebook.com
 LATEST_API_VERSION=v22.0
 ```
+
+**⚠️ Security Note**: The `BEARER_TOKEN` is required for API authentication. Generate a secure random token (minimum 32 characters).
 
 ## 🔧 Instagram Setup
 
@@ -73,6 +76,41 @@ Optional parameters:
 
 - **SSE Endpoint**: `http://localhost:8080/sse`
 - **Messages Endpoint**: `http://localhost:8080/messages/`
+
+### 🔐 Authentication
+
+All requests to the server require Bearer token authentication. Include the authorization header:
+
+```bash
+Authorization: Bearer your_secure_bearer_token_here
+```
+
+Example with curl:
+```bash
+curl -H "Authorization: Bearer your_secure_bearer_token_here" \
+     -H "Content-Type: application/json" \
+     http://localhost:8080/sse
+```
+
+### 🔐 Generating Secure Bearer Tokens
+
+Use the included token generator to create a secure Bearer token:
+
+```bash
+python generate_token.py
+```
+
+This will generate three different types of secure tokens. Copy one to your `.env` file.
+
+### 🧪 Testing Authentication
+
+Test your Bearer token authentication:
+
+```bash
+python test_auth.py
+```
+
+This script will test authentication with invalid and valid tokens.
 
 ## 🛠️ Available Tools
 
@@ -124,7 +162,10 @@ get_instagram_account_info()
 instagram-mcp/
 ├── instagram-mcp.py      # Main MCP server
 ├── requirements.txt      # Python dependencies
+├── generate_token.py     # Bearer token generator
+├── test_auth.py         # Authentication test script
 ├── .env                 # Environment variables
+├── .env.example         # Environment variables template
 └── README.md           # Documentation
 ```
 
@@ -139,17 +180,25 @@ instagram-mcp/
 
 ## ⚠️ Limitations and Considerations
 
-1. **Rate Limits**: Instagram API has rate limits. Monitor your usage
-2. **Tokens**: Access tokens have expiration dates. Use the refresh tool
-3. **Image Formats**: Only supported formats (JPEG, PNG)
-4. **File Size**: Respect Instagram API size limits
-5. **Public URLs**: Images must be hosted on publicly accessible URLs
+1. **Security**: Bearer token authentication is required for all API endpoints
+2. **Rate Limits**: Instagram API has rate limits. Monitor your usage
+3. **Tokens**: Access tokens have expiration dates. Use the refresh tool
+4. **Image Formats**: Only supported formats (JPEG, PNG)
+5. **File Size**: Respect Instagram API size limits
+6. **Public URLs**: Images must be hosted on publicly accessible URLs
 
 ## 🐛 Troubleshooting
 
+### Authentication Error
+```bash
+# Check if the Bearer token is correct in .env
+# Ensure all requests include the Authorization header
+curl -H "Authorization: Bearer your_token" http://localhost:8080/sse
+```
+
 ### Invalid Token Error
 ```bash
-# Check if the token is correct in .env
+# Check if the Instagram token is correct in .env
 # Use the refresh tool if necessary
 refresh_instagram_access_token()
 ```

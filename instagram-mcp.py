@@ -13,6 +13,13 @@ from starlette.requests import Request
 from starlette.routing import Mount, Route
 from mcp.server import Server
 import uvicorn
+from dotenv import load_dotenv
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+from starlette.status import HTTP_401_UNAUTHORIZED
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Initialize FastMCP server for Instagram tools (SSE)
 mcp = FastMCP("Instagram MCP Server")
@@ -22,6 +29,17 @@ INSTAGRAM_ACCESS_TOKEN = os.getenv("INSTAGRAM_ACCESS_TOKEN")
 INSTAGRAM_ACCOUNT_ID = os.getenv("INSTAGRAM_ACCOUNT_ID")
 HOST_URL = os.getenv("HOST_URL", "graph.facebook.com")
 LATEST_API_VERSION = os.getenv("LATEST_API_VERSION", "v21.0")
+
+# Bearer token for API authentication
+BEARER_TOKEN = os.getenv("BEARER_TOKEN")
+
+# Validate required environment variables
+if not INSTAGRAM_ACCESS_TOKEN:
+    raise ValueError("INSTAGRAM_ACCESS_TOKEN environment variable is required")
+if not INSTAGRAM_ACCOUNT_ID:
+    raise ValueError("INSTAGRAM_ACCOUNT_ID environment variable is required")
+if not BEARER_TOKEN:
+    raise ValueError("BEARER_TOKEN environment variable is required")
 
 async def make_instagram_request(url: str, method: str = "GET", data: dict = None, json_data: dict = None) -> dict[str, Any] | None:
     """Make a request to the Instagram API with proper error handling."""
@@ -181,6 +199,45 @@ async def get_recent_media(limit: int = 10) -> str:
     else:
         return f"Failed to get recent media: {result}"
 
+class BearerTokenMiddleware(BaseHTTPMiddleware):
+    """Middleware to validate Bearer token authentication."""
+    
+    def __init__(self, app, bearer_token: str):
+        super().__init__(app)
+        self.bearer_token = bearer_token
+    
+    async def dispatch(self, request: Request, call_next):
+        # Skip authentication for health check endpoints (if any)
+        if request.url.path in ["/health", "/ping"]:
+            return await call_next(request)
+        
+        # Get Authorization header
+        authorization = request.headers.get("Authorization")
+        
+        if not authorization:
+            return JSONResponse(
+                status_code=HTTP_401_UNAUTHORIZED,
+                content={"error": "Missing Authorization header"}
+            )
+        
+        # Check if it's a Bearer token
+        if not authorization.startswith("Bearer "):
+            return JSONResponse(
+                status_code=HTTP_401_UNAUTHORIZED,
+                content={"error": "Invalid authorization format. Use 'Bearer <token>'"}
+            )
+        
+        # Extract and validate token
+        token = authorization[7:]  # Remove "Bearer " prefix
+        if token != self.bearer_token:
+            return JSONResponse(
+                status_code=HTTP_401_UNAUTHORIZED,
+                content={"error": "Invalid Bearer token"}
+            )
+        
+        # Token is valid, continue with the request
+        return await call_next(request)
+
 def create_starlette_app(mcp_server: Server, *, debug: bool = False) -> Starlette:
     """Create a Starlette application that can serve the provided MCP server with SSE."""
     sse = SseServerTransport("/messages/")
@@ -197,13 +254,19 @@ def create_starlette_app(mcp_server: Server, *, debug: bool = False) -> Starlett
                 mcp_server.create_initialization_options(),
             )
 
-    return Starlette(
+    # Create Starlette app with routes
+    app = Starlette(
         debug=debug,
         routes=[
             Route("/sse", endpoint=handle_sse),
             Mount("/messages/", app=sse.handle_post_message),
         ],
     )
+    
+    # Add Bearer token authentication middleware
+    app.add_middleware(BearerTokenMiddleware, bearer_token=BEARER_TOKEN)
+    
+    return app
 
 if __name__ == "__main__":
     mcp_server = mcp._mcp_server  # noqa: WPS437
@@ -211,11 +274,13 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Run Instagram MCP SSE-based server')
-    parser.add_argument('--host', default='0.0.0.0', help='Host to bind to')
-    parser.add_argument('--port', type=int, default=8080, help='Port to listen on')
+    parser.add_argument('--host', default=os.getenv('HOST', '0.0.0.0'), help='Host to bind to')
+    parser.add_argument('--port', type=int, default=int(os.getenv('PORT', '8080')), help='Port to listen on')
     args = parser.parse_args()
 
     print(f"Starting Instagram MCP Server with SSE transport on {args.host}:{args.port}")
+    print("Environment variables loaded from .env file")
+    print("🔒 Bearer token authentication enabled")
     print("Available tools:")
     print("- refresh_instagram_access_token")
     print("- upload_image_without_caption")
@@ -227,8 +292,13 @@ if __name__ == "__main__":
     print()
     print("SSE endpoint: /sse")
     print("Messages endpoint: /messages/")
+    print()
+    print("⚠️  Authentication required: Include 'Authorization: Bearer <your-token>' header")
 
     # Bind SSE request handling to MCP server
     starlette_app = create_starlette_app(mcp_server, debug=True)
+
+    # Add Bearer token middleware
+    starlette_app.add_middleware(BearerTokenMiddleware, bearer_token=BEARER_TOKEN)
 
     uvicorn.run(starlette_app, host=args.host, port=args.port)
